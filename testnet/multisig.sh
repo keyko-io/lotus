@@ -12,20 +12,24 @@ lotus send --source $MAIN $ACCOUNT2 5
 lotus send --source $MAIN $ACCOUNT3 5
 lotus send --source $MAIN $ACCOUNT4 5
 
-while [ "5" != "$(lotus wallet balance $ACCOUNT1)" ]
+while [ "5 FIL" != "$(lotus wallet balance $ACCOUNT1)" ]
 do
  sleep 1
  lotus wallet balance $ACCOUNT1
 done
 
 
-# should error earlier if no addresses
-export RET=$(lotus msig create --sender $ACCOUNT1 $ACCOUNT1 $ACCOUNT2 $ACCOUNT3 $ACCOUNT4)
+# this command should error earlier if no addresses
+export RET=$(lotus msig create --from $ACCOUNT1 $ACCOUNT1 $ACCOUNT2 $ACCOUNT3 $ACCOUNT4)
 
 export MSIG_ADDRESS=$(echo $RET | awk '{print $5}')
 export MSIG_ACCOUNT=$(echo $RET | awk '{print $4}')
 
+echo "Created address $MSIG_ADDRESS $MSIG_ACCOUNT ($RET)"
+
 lotus wallet balance $MSIG_ADDRESS
+
+lotus-shed verifreg list-verifiers
 
 lotus-shed verifreg set-root --from $ROOT $MSIG_ACCOUNT
 
@@ -42,10 +46,4 @@ lotus msig approve --source $ACCOUNT3 $MSIG_ADDRESS 0 $ACCOUNT1 t06 0 2 $PARAM
 lotus msig approve --source $ACCOUNT4 $MSIG_ADDRESS 0 $ACCOUNT1 t06 0 2 $PARAM
 
 lotus-shed verifreg list-verifiers
-
-# lotus msig propose --source $ACCOUNT1 $MSIG_ADDRESS t080 1
-
-# lotus msig approve --source $ACCOUNT2 $MSIG_ADDRESS 4 $ACCOUNT1 t080 1
-# lotus msig approve --source $ACCOUNT3 $MSIG_ADDRESS 4 $ACCOUNT1 t080 1
-# lotus msig approve --source $ACCOUNT4 $MSIG_ADDRESS 4 $ACCOUNT1 t080 1
 

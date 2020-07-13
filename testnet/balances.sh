@@ -28,22 +28,23 @@ do
  lotus wallet balance $ROOT
 done
 
-
-# lotus-shed verifreg add-verifier t080 100000000000000000000000000000000000000000
-# lotus-shed verifreg add-verifier t1fj2s6phuwkn32t3ocilhcpd2vwuu2zdcngdcqhy 100000000000000000000000000000000000000000
-
+# Add verifier
 lotus-shed verifreg add-verifier --from $ROOT t01001 100000000000000000000000000000000000000000
-
 lotus-shed verifreg list-verifiers
 
+# Add verified client
 lotus-shed verifreg verify-client --from $VERIFIER $CLIENT 10000000000000000000000000000000000000000
-
 lotus-shed verifreg list-clients
+
+# Remove verifier datacap
+lotus-shed verifreg add-verifier --from $ROOT t01001 0
+lotus-shed verifreg list-verifiers
 
 export DATA=$(lotus client import dddd | awk '{print $NF}')
 
 lotus client local
 
+# Client can make a verified deal
 lotus client deal --verified-deal --from $CLIENT $DATA t01000 0.005 100000
 
 while [ "3" != "$(lotus-storage-miner sectors list | wc -l)" ]
