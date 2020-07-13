@@ -387,7 +387,8 @@ func (a *StateAPI) StateWaitMsg(ctx context.Context, msg cid.Cid, confidence uin
 	return &api.MsgLookup{
 		Receipt:   *recpt,
 		ReturnDec: returndec,
-		TipSet:    ts,
+		TipSet:    ts.Key(),
+		Height:    ts.Height(),
 	}, nil
 }
 
@@ -400,7 +401,8 @@ func (a *StateAPI) StateSearchMsg(ctx context.Context, msg cid.Cid) (*api.MsgLoo
 	if ts != nil {
 		return &api.MsgLookup{
 			Receipt: *recpt,
-			TipSet:  ts,
+			TipSet:  ts.Key(),
+			Height:  ts.Height(),
 		}, nil
 	} else {
 		return nil, nil
@@ -803,7 +805,7 @@ func (a *StateAPI) StateMinerInitialPledgeCollateral(ctx context.Context, maddr 
 	}
 
 	sectorWeight := miner.QAPowerForWeight(ssize, duration, dealWeights.DealWeight, dealWeights.VerifiedDealWeight)
-	initialPledge := miner.InitialPledgeForPower(sectorWeight, powerState.TotalQualityAdjPower, powerState.TotalPledgeCollateral, rewardState.LastPerEpochReward, circSupply)
+	initialPledge := miner.InitialPledgeForPower(sectorWeight, powerState.TotalQualityAdjPower, powerState.TotalPledgeCollateral, rewardState.ThisEpochReward, circSupply)
 
 	return types.BigDiv(types.BigMul(initialPledge, initialPledgeNum), initialPledgeDen), nil
 }
