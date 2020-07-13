@@ -22,7 +22,7 @@ lotus send --source $MAIN $VERIFIER 5000000
 # Send funds to client
 lotus send --source $MAIN $CLIENT 5000000
 
-while [ "5000000" != "$(lotus wallet balance $ROOT)" ]
+while [ "5000000 FIL" != "$(lotus wallet balance $ROOT)" ]
 do
  sleep 1
  lotus wallet balance $ROOT
@@ -40,7 +40,7 @@ lotus-shed verifreg verify-client --from $VERIFIER $CLIENT 100000000000000000000
 
 lotus-shed verifreg list-clients
 
-export DATA=$(lotus client import dddd)
+export DATA=$(lotus client import dddd | awk '{print $NF}')
 
 lotus client local
 
@@ -52,7 +52,7 @@ do
  lotus-storage-miner sectors list
 done
 
-curl -H "Content-Type: application/json" -H "Authorization: Bearer $(cat ~/.lotusstorage/token)" -d '{"id": 1, "method": "Filecoin.SectorStartSealing", "params": [3]}' localhost:2345/rpc/v0
+curl -H "Content-Type: application/json" -H "Authorization: Bearer $(cat ~/.lotusstorage/token)" -d '{"id": 1, "method": "Filecoin.SectorStartSealing", "params": [2]}' localhost:2345/rpc/v0
 
 lotus-storage-miner info
 
