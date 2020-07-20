@@ -33,7 +33,7 @@ configure_lotus() {
   $LOTUS_SEED genesis add-miner $LOTUS_PATH/localnet.json ~/.genesis-sectors/pre-seal-t01000.json
   jq --arg root $ROOT '. + {RootKey: "t0101"}' $LOTUS_PATH/localnet.json > $LOTUS_PATH/localnet2.json
 #  jq '.Accounts |= . + [{Type: "multisig", Balance: "50000000000000000000000000", Meta: { Signers: ["t01001"], Threshold: 1 }}]' $LOTUS_PATH/localnet2.json > $LOTUS_PATH/localnet.json
-  jq '.Accounts |= . + [{Type: "multisig", Balance: "50000000000000000000000000", Meta: { Signers: ["t1dce6ymzvvl3m3nk3o74ztkg4izmvzarky3uqtza", "t1macdda4f5osjhobtg6ycqbdlomsedjt2zijdtuy"], Threshold: 2 }}]' $LOTUS_PATH/localnet2.json > $LOTUS_PATH/localnet.json
+  jq '.Accounts |= . + [{Type: "multisig", Balance: "50000000000000000000000000", Meta: { Signers: ["t1dce6ymzvvl3m3nk3o74ztkg4izmvzarky3uqtza", "t1pnzozdkjnmtmnh6i3ufl7ianvwl2lq7tybazudy"], Threshold: 2 }}]' $LOTUS_PATH/localnet2.json > $LOTUS_PATH/localnet.json
 
   tmux new-session -s lotus -n script -d bash balances.sh
 
