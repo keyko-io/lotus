@@ -233,6 +233,8 @@ var verifRegVerifyClientCmd = &cli.Command{
 			return err
 		}
 
+		fmt.Println(hex.EncodeToString(params))
+
 		api, closer, err := lcli.GetFullNodeAPI(cctx)
 		if err != nil {
 			return err

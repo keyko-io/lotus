@@ -24,13 +24,13 @@ func InitVerifiedRegistryActor(k address.Address) {
 	}
 
 	RootVerifierAddr = k
-
-	idk, err := address.NewFromString("t080")
-	if err != nil {
-		panic(err)
-	}
-
-	RootVerifierID = idk
+	/*
+		idk, err := address.NewFromString("t080")
+		if err != nil {
+			panic(err)
+		}
+	*/
+	RootVerifierID = k
 }
 
 func SetupVerifiedRegistryActor(bs bstore.Blockstore) (*types.Actor, error) {

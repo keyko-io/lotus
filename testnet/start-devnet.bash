@@ -25,23 +25,28 @@ configure_lotus() {
   $LOTUS_SEED pre-seal --sector-size 2KiB --num-sectors 2
   $LOTUS_SEED pre-seal --sector-size 2KiB --num-sectors 2 --miner-addr t01001
 
-  export ROOT=$(cat ~/.genesis-sectors/pre-seal-t01001.json | jq -r '.t01001 | .Owner')
+#  export ROOT=$(cat ~/.genesis-sectors/pre-seal-t01001.json | jq -r '.t01001 | .Owner')
+  export ROOT=t101
 
   echo -e "\nCreate the genesis block and start up the first node:\n"
   $LOTUS_SEED genesis new $LOTUS_PATH/localnet.json
   $LOTUS_SEED genesis add-miner $LOTUS_PATH/localnet.json ~/.genesis-sectors/pre-seal-t01000.json
-  jq --arg root $ROOT '. + {RootKey: $root}' ../localnet.json > $LOTUS_PATH/localnet2.json
+  jq --arg root $ROOT '. + {RootKey: "t0101"}' $LOTUS_PATH/localnet.json > $LOTUS_PATH/localnet2.json
+#  jq '.Accounts |= . + [{Type: "multisig", Balance: "50000000000000000000000000", Meta: { Signers: ["t01001"], Threshold: 1 }}]' $LOTUS_PATH/localnet2.json > $LOTUS_PATH/localnet.json
+  jq '.Accounts |= . + [{Type: "multisig", Balance: "50000000000000000000000000", Meta: { Signers: ["t1dce6ymzvvl3m3nk3o74ztkg4izmvzarky3uqtza", "t1pnzozdkjnmtmnh6i3ufl7ianvwl2lq7tybazudy"], Threshold: 2 }}]' $LOTUS_PATH/localnet2.json > $LOTUS_PATH/localnet.json
 
   tmux new-session -s lotus -n script -d bash balances.sh
 
   sleep 5
-  tmux new-window -t lotus:1 -n daemon -d $LOTUS_BIN daemon --lotus-make-genesis=dev.gen --genesis-template=$LOTUS_PATH/localnet2.json --bootstrap=false
-#  $LOTUS_BIN daemon --lotus-make-genesis=dev.gen --genesis-template=$LOTUS_PATH/localnet2.json --bootstrap=false &
+  tmux new-window -t lotus:1 -n daemon -d $LOTUS_BIN daemon --lotus-make-genesis=dev.gen --genesis-template=$LOTUS_PATH/localnet.json --bootstrap=false
+#  $LOTUS_BIN daemon --lotus-make-genesis=dev.gen --genesis-template=$LOTUS_PATH/localnet.json --bootstrap=false &
 
-  sleep 5
+  $LOTUS_BIN wait-api
   echo -e "\nImporting the genesis miner key:\n"
   $LOTUS_BIN wallet import ~/.genesis-sectors/pre-seal-t01000.key
   $LOTUS_BIN wallet import ~/.genesis-sectors/pre-seal-t01001.key
+  $LOTUS_BIN wallet import key1
+  $LOTUS_BIN wallet import key2
 
   sleep 3
   echo -e "\nSetting up the genesis miner:\n"

@@ -1,8 +1,12 @@
 package main
 
 import (
+	"encoding/csv"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
+	"os"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/mitchellh/go-homedir"
@@ -10,6 +14,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/specs-actors/actors/abi"
 	"github.com/filecoin-project/specs-actors/actors/abi/big"
 
 	"github.com/filecoin-project/lotus/build"
@@ -23,6 +28,7 @@ var genesisCmd = &cli.Command{
 	Subcommands: []*cli.Command{
 		genesisNewCmd,
 		genesisAddMinerCmd,
+		genesisAddMsigsCmd,
 	},
 }
 
@@ -138,6 +144,125 @@ var genesisAddMinerCmd = &cli.Command{
 			return err
 		}
 
+		return nil
+	},
+}
+
+type GenAccountEntry struct {
+	ID          string
+	CustodianID int
+	M           int
+	N           int
+	Addresses   []address.Address
+	Type        string
+	Sig1        string
+	Sig2        string
+}
+
+var genesisAddMsigsCmd = &cli.Command{
+	Name: "add-msigs",
+	Action: func(cctx *cli.Context) error {
+		if cctx.Args().Len() < 2 {
+			return fmt.Errorf("must specify template file and csv file with accounts")
+		}
+
+		genf, err := homedir.Expand(cctx.Args().First())
+		if err != nil {
+			return err
+		}
+
+		csvf, err := homedir.Expand(cctx.Args().Get(1))
+		if err != nil {
+			return err
+		}
+
+		var template genesis.Template
+		b, err := ioutil.ReadFile(genf)
+		if err != nil {
+			return xerrors.Errorf("read genesis template: %w", err)
+		}
+
+		if err := json.Unmarshal(b, &template); err != nil {
+			return xerrors.Errorf("unmarshal genesis template: %w", err)
+		}
+
+		fileReader, err := os.Open(csvf)
+		if err != nil {
+			return xerrors.Errorf("read multisig csv: %w", err)
+		}
+		r := csv.NewReader(fileReader)
+		records, err := r.ReadAll()
+		if err != nil {
+			return xerrors.Errorf("read multisig csv: %w", err)
+		}
+		var entries []GenAccountEntry
+		for _, e := range records {
+			var addrs []address.Address
+			for _, a := range e[7:] {
+				if a == "" {
+					continue
+				}
+				addr, err := address.NewFromString(a)
+				if err != nil {
+					return err
+				}
+				addrs = append(addrs, addr)
+			}
+			custodianID, err := strconv.Atoi(e[1])
+			if err != nil {
+				return xerrors.Errorf("Custodian ID must be integer")
+			}
+			threshold, err := strconv.Atoi(e[2])
+			if err != nil {
+				return xerrors.Errorf("Threshold must be integer")
+			}
+			num, err := strconv.Atoi(e[3])
+			if err != nil {
+				return xerrors.Errorf("Number of addresses be integer")
+			}
+			entry := GenAccountEntry{
+				ID: e[0],
+				CustodianID: custodianID,
+				M: threshold,
+				N: num,
+				Type: e[4],
+				Sig1: e[5],
+				Sig2: e[6],
+				Addresses: addrs,
+			}
+			entries = append(entries, entry)
+		}
+
+		for i, e := range entries {
+			if len(e.Addresses) != e.N {
+				return fmt.Errorf("entry %d had mismatch between 'N' and number of addresses", i)
+			}
+
+			msig := &genesis.MultisigMeta{
+				Signers:         e.Addresses,
+				Threshold:       e.M,
+				VestingDuration: 0, // TODO
+				VestingStart:    0, // TODO
+			}
+
+			act := genesis.Actor{
+				Type:    genesis.TMultisig,
+				Balance: abi.NewTokenAmount(0), // TODO
+				Meta:    msig.ActorMeta(),
+			}
+
+			template.Accounts = append(template.Accounts, act)
+
+		}
+
+		b, err = json.MarshalIndent(&template, "", "  ")
+		if err != nil {
+			return err
+		}
+
+		if err := ioutil.WriteFile(genf, b, 0644); err != nil {
+			return err
+		}
 		return nil
 	},
 }

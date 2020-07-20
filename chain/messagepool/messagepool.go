@@ -411,7 +411,7 @@ func (mp *MessagePool) addSkipChecks(m *types.SignedMessage) error {
 }
 
 func (mp *MessagePool) addLocked(m *types.SignedMessage) error {
-	log.Debugf("mpooladd: %s %d", m.Message.From, m.Message.Nonce)
+	log.Infof("mpooladd: %s %d", m.Message.From, m.Message.Nonce)
 	if m.Signature.Type == crypto.SigTypeBLS {
 		mp.blsSigCache.Add(m.Cid(), m.Signature)
 	}
@@ -558,6 +558,7 @@ func (mp *MessagePool) PushWithNonce(ctx context.Context, addr address.Address, 
 	if err := mp.addLocal(msg, msgb); err != nil {
 		log.Errorf("addLocal failed: %+v", err)
 	}
+	log.Infof("mpooladd: push with nonce %s %d", msg.Message.From, msg.Message.Nonce)
 
 	return msg, mp.api.PubSubPublish(build.MessagesTopic(mp.netName), msgb)
 }
@@ -725,7 +726,7 @@ func (mp *MessagePool) HeadChange(revert []*types.TipSet, apply []*types.TipSet)
 		for a, bkt := range buckets {
 			act, err := mp.api.StateGetActor(a, ts)
 			if err != nil {
-				log.Debugf("%s, err: %s\n", a, err)
+				log.Infof("%s, err: %s\n", a, err)
 				continue
 			}
 
@@ -757,7 +758,7 @@ func (mp *MessagePool) HeadChange(revert []*types.TipSet, apply []*types.TipSet)
 					ccid = cmsg.Cid().String()
 				}
 
-				log.Debugw("Nonce gap",
+				log.Infof("Nonce gap",
 					"actor", a,
 					"future_cid", m.Cid(),
 					"future_nonce", ff,

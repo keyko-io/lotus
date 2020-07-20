@@ -549,12 +549,14 @@ func SelectMessages(ctx context.Context, al ActorLookup, ts *types.TipSet, msgs 
 
 		if inclBalances[from].LessThan(msg.Message.RequiredFunds()) {
 			tooLowFundMsgs++
+			log.Warnf("no funds %v", msg.Message.From)
 			// todo: drop from mpool
 			continue
 		}
 
 		if msg.Message.Nonce > inclNonces[from] {
 			tooHighNonceMsgs++
+			log.Warnf("too high nonce %v", msg.Message.From)
 			continue
 		}
 

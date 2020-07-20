@@ -6,11 +6,13 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/filecoin-project/specs-actors/actors/abi"
 	"os"
 	"sort"
 	"strconv"
 	"text/tabwriter"
+
+	"github.com/filecoin-project/specs-actors/actors/abi"
+	"github.com/minio/blake2b-simd"
 
 	"github.com/filecoin-project/go-address"
 	init_ "github.com/filecoin-project/specs-actors/actors/builtin/init"
@@ -25,6 +27,7 @@ import (
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/api/apibstore"
 	"github.com/filecoin-project/lotus/build"
+	"github.com/filecoin-project/lotus/chain/actors"
 	types "github.com/filecoin-project/lotus/chain/types"
 )
 
@@ -342,6 +345,14 @@ var msigProposeCmd = &cli.Command{
 			from = defaddr
 		}
 
+		enc, _ := actors.SerializeParams(&samsig.ProposeParams{
+			To:     dest,
+			Value:  types.BigInt(value),
+			Method: abi.MethodNum(method),
+			Params: params,
+		})
+		fmt.Println(hex.EncodeToString(enc))
+
 		msgCid, err := api.MsigPropose(ctx, msig, dest, types.BigInt(value), from, method, params)
 		if err != nil {
 			return err
@@ -457,6 +468,23 @@ var msigApproveCmd = &cli.Command{
 			}
 			from = defaddr
 		}
+
+		hashData := samsig.ProposalHashData{
+			Requester: proposer,
+			To:        dest,
+			Value:     types.BigInt(value),
+			Method:    abi.MethodNum(method),
+			Params:    params,
+		}
+		pser, err := hashData.Serialize()
+		fmt.Println(hex.EncodeToString(pser))
+		phash := blake2b.Sum256(pser)
+
+		enc, err := actors.SerializeParams(&samsig.TxnIDParams{
+			ID:           samsig.TxnID(txid),
+			ProposalHash: phash[:],
+		})
+		fmt.Println(hex.EncodeToString(enc))
 
 		msgCid, err := api.MsigApprove(ctx, msig, txid, proposer, dest, types.BigInt(value), from, method, params)
 		if err != nil {

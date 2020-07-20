@@ -2,6 +2,8 @@ package full
 
 import (
 	"context"
+	"encoding/hex"
+	"fmt"
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/lotus/api"
@@ -116,6 +118,7 @@ func (a *MsigAPI) MsigPropose(ctx context.Context, msig address.Address, to addr
 	if actErr != nil {
 		return cid.Undef, actErr
 	}
+	fmt.Println(hex.EncodeToString(enc))
 
 	msg := &types.Message{
 		To:       msig,
