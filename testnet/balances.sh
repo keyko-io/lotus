@@ -39,12 +39,12 @@ done
 lotus msig propose --from $ROOT1 t080 t06 0 2 824300eb0753000125dfa371a19e6f7cb54395ca0000000000
 lotus msig inspect t080
 
-node ~/js-hamt-ipld/samples/methods/approve-verifier.js
+node ~/filecoin-verifier-tools/samples/api/approve-verifier.js
 
 sleep 5
 lotus-shed verifreg list-verifiers
 
-node ~/js-hamt-ipld/samples/methods/propose-verifier.js
+node ~/filecoin-verifier-tools/samples/api/propose-verifier.js
 sleep 5
 lotus msig inspect t080
 sleep 5
@@ -55,7 +55,7 @@ lotus-shed verifreg list-verifiers
 
 # lotus-shed verifreg verify-client --from $VERIFIER $CLIENT 10000000000000000000000000000000000000000
 
-node ~/js-hamt-ipld/samples/methods/add-client.js $CLIENT
+node ~/filecoin-verifier-tools/samples/api/add-client.js $CLIENT
 sleep 5
 lotus-shed verifreg list-clients
 
