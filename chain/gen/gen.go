@@ -93,8 +93,10 @@ func (m mybs) Get(c cid.Cid) (block.Block, error) {
 	return b, nil
 }
 
+var verifregRootTestKey, _ = address.NewFromString("t16bvkginoioylpyfblbytvornl5o63hngiiorlby")
+
 var rootkeyMultisig = genesis.MultisigMeta{
-	Signers:         []address.Address{remAccTestKey},
+	Signers:         []address.Address{verifregRootTestKey},
 	Threshold:       1,
 	VestingDuration: 0,
 	VestingStart:    0,
