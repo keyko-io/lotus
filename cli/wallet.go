@@ -9,13 +9,15 @@ import (
 	"os"
 	"strings"
 
-	"github.com/filecoin-project/go-address"
-	types "github.com/filecoin-project/lotus/chain/types"
-	"github.com/filecoin-project/lotus/chain/wallet"
-	"github.com/filecoin-project/specs-actors/actors/crypto"
+	"github.com/urfave/cli/v2"
 	"golang.org/x/xerrors"
 
-	"github.com/urfave/cli/v2"
+	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/go-state-types/big"
+	"github.com/filecoin-project/go-state-types/crypto"
+
+	types "github.com/filecoin-project/lotus/chain/types"
+	"github.com/filecoin-project/lotus/lib/tablewriter"
 )
 
 var walletCmd = &cli.Command{
@@ -52,7 +54,7 @@ var walletNew = &cli.Command{
 			t = "secp256k1"
 		}
 
-		nk, err := api.WalletNew(ctx, wallet.ActSigType(t))
+		nk, err := api.WalletNew(ctx, types.KeyType(t))
 		if err != nil {
 			return err
 		}
@@ -66,6 +68,13 @@ var walletNew = &cli.Command{
 var walletList = &cli.Command{
 	Name:  "list",
 	Usage: "List wallet address",
+	Flags: []cli.Flag{
+		&cli.BoolFlag{
+			Name:    "addr-only",
+			Usage:   "Only print addresses",
+			Aliases: []string{"a"},
+		},
+	},
 	Action: func(cctx *cli.Context) error {
 		api, closer, err := GetFullNodeAPI(cctx)
 		if err != nil {
@@ -79,9 +88,52 @@ var walletList = &cli.Command{
 			return err
 		}
 
+		// Assume an error means no default key is set
+		def, _ := api.WalletDefaultAddress(ctx)
+
+		tw := tablewriter.New(
+			tablewriter.Col("Address"),
+			tablewriter.Col("Balance"),
+			tablewriter.Col("Nonce"),
+			tablewriter.Col("Default"),
+			tablewriter.NewLineCol("Error"))
+
 		for _, addr := range addrs {
-			fmt.Println(addr.String())
+			if cctx.Bool("addr-only") {
+				fmt.Println(addr.String())
+			} else {
+				a, err := api.StateGetActor(ctx, addr, types.EmptyTSK)
+				if err != nil {
+					if !strings.Contains(err.Error(), "actor not found") {
+						tw.Write(map[string]interface{}{
+							"Address": addr,
+							"Error":   err,
+						})
+						continue
+					}
+
+					a = &types.Actor{
+						Balance: big.Zero(),
+					}
+				}
+
+				row := map[string]interface{}{
+					"Address": addr,
+					"Balance": types.FIL(a.Balance),
+					"Nonce":   a.Nonce,
+				}
+				if addr == def {
+					row["Default"] = "X"
+				}
+
+				tw.Write(row)
+			}
 		}
+
+		if !cctx.Bool("addr-only") {
+			return tw.Flush(os.Stdout)
+		}
+
 		return nil
 	},
 }
@@ -276,9 +328,9 @@ var walletImport = &cli.Command{
 			ki.PrivateKey = gk.PrivateKey
 			switch gk.SigType {
 			case 1:
-				ki.Type = wallet.KTSecp256k1
+				ki.Type = types.KTSecp256k1
 			case 2:
-				ki.Type = wallet.KTBLS
+				ki.Type = types.KTBLS
 			default:
 				return fmt.Errorf("unrecognized key type: %d", gk.SigType)
 			}
@@ -382,7 +434,11 @@ var walletVerify = &cli.Command{
 			return err
 		}
 
-		if api.WalletVerify(ctx, addr, msg, &sig) {
+		ok, err := api.WalletVerify(ctx, addr, msg, &sig)
+		if err != nil {
+			return err
+		}
+		if ok {
 			fmt.Println("valid")
 			return nil
 		}

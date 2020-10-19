@@ -20,6 +20,7 @@ import (
 	"github.com/ipld/go-car"
 
 	"github.com/filecoin-project/go-fil-markets/storagemarket"
+	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/build"
 	sealing "github.com/filecoin-project/lotus/extern/storage-sealing"
@@ -35,7 +36,7 @@ import (
 
 var MineNext = miner.MineReq{
 	InjectNulls: 0,
-	Done:        func(bool, error) {},
+	Done:        func(bool, abi.ChainEpoch, error) {},
 }
 
 func init() {
@@ -47,7 +48,7 @@ func TestDealFlow(t *testing.T, b APIBuilder, blocktime time.Duration, carExport
 	_ = os.Setenv("BELLMAN_NO_GPU", "1")
 
 	ctx := context.Background()
-	n, sn := b(t, 1, OneMiner)
+	n, sn := b(t, OneFull, OneMiner)
 	client := n[0].FullNode.(*impl.FullNodeAPI)
 	miner := sn[0]
 
@@ -84,7 +85,7 @@ func TestDoubleDealFlow(t *testing.T, b APIBuilder, blocktime time.Duration) {
 	_ = os.Setenv("BELLMAN_NO_GPU", "1")
 
 	ctx := context.Background()
-	n, sn := b(t, 1, OneMiner)
+	n, sn := b(t, OneFull, OneMiner)
 	client := n[0].FullNode.(*impl.FullNodeAPI)
 	miner := sn[0]
 
@@ -148,7 +149,7 @@ func TestFastRetrievalDealFlow(t *testing.T, b APIBuilder, blocktime time.Durati
 	_ = os.Setenv("BELLMAN_NO_GPU", "1")
 
 	ctx := context.Background()
-	n, sn := b(t, 1, OneMiner)
+	n, sn := b(t, OneFull, OneMiner)
 	client := n[0].FullNode.(*impl.FullNodeAPI)
 	miner := sn[0]
 
@@ -203,7 +204,7 @@ func TestSenondDealRetrieval(t *testing.T, b APIBuilder, blocktime time.Duration
 	_ = os.Setenv("BELLMAN_NO_GPU", "1")
 
 	ctx := context.Background()
-	n, sn := b(t, 1, OneMiner)
+	n, sn := b(t, OneFull, OneMiner)
 	client := n[0].FullNode.(*impl.FullNodeAPI)
 	miner := sn[0]
 
@@ -333,7 +334,7 @@ loop:
 func waitDealPublished(t *testing.T, ctx context.Context, miner TestStorageNode, deal *cid.Cid) {
 	subCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	updates, err := miner.MarketGetDealUpdates(subCtx, *deal)
+	updates, err := miner.MarketGetDealUpdates(subCtx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,18 +343,20 @@ func waitDealPublished(t *testing.T, ctx context.Context, miner TestStorageNode,
 		case <-ctx.Done():
 			t.Fatal("context timeout")
 		case di := <-updates:
-			switch di.State {
-			case storagemarket.StorageDealProposalRejected:
-				t.Fatal("deal rejected")
-			case storagemarket.StorageDealFailing:
-				t.Fatal("deal failed")
-			case storagemarket.StorageDealError:
-				t.Fatal("deal errored", di.Message)
-			case storagemarket.StorageDealFinalizing, storagemarket.StorageDealSealing, storagemarket.StorageDealActive:
-				fmt.Println("COMPLETE", di)
-				return
+			if deal.Equals(di.ProposalCid) {
+				switch di.State {
+				case storagemarket.StorageDealProposalRejected:
+					t.Fatal("deal rejected")
+				case storagemarket.StorageDealFailing:
+					t.Fatal("deal failed")
+				case storagemarket.StorageDealError:
+					t.Fatal("deal errored", di.Message)
+				case storagemarket.StorageDealFinalizing, storagemarket.StorageDealSealing, storagemarket.StorageDealActive:
+					fmt.Println("COMPLETE", di)
+					return
+				}
+				fmt.Println("Deal state: ", storagemarket.DealStates[di.State])
 			}
-			fmt.Println("Deal state: ", storagemarket.DealStates[di.State])
 		}
 	}
 }
@@ -399,9 +402,12 @@ func testRetrieval(t *testing.T, ctx context.Context, client *impl.FullNodeAPI, 
 		IsCAR: carExport,
 	}
 	updates, err := client.ClientRetrieveWithEvents(ctx, offers[0].Order(caddr), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for update := range updates {
 		if update.Err != "" {
-			t.Fatalf("%v", err)
+			t.Fatalf("retrieval failed: %s", update.Err)
 		}
 	}
 

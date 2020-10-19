@@ -11,11 +11,11 @@ import (
 	"github.com/filecoin-project/go-fil-markets/piecestore"
 	"github.com/filecoin-project/go-fil-markets/retrievalmarket"
 	"github.com/filecoin-project/go-fil-markets/storagemarket"
+	"github.com/filecoin-project/go-state-types/abi"
 	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/filecoin-project/lotus/extern/sector-storage/fsutil"
 	"github.com/filecoin-project/lotus/extern/sector-storage/stores"
 	"github.com/filecoin-project/lotus/extern/sector-storage/storiface"
-	"github.com/filecoin-project/specs-actors/actors/abi"
 )
 
 // StorageMiner is a low-level interface to the Filecoin network storage miner node
@@ -71,9 +71,9 @@ type StorageMiner interface {
 	stores.SectorIndex
 
 	MarketImportDealData(ctx context.Context, propcid cid.Cid, path string) error
-	MarketListDeals(ctx context.Context) ([]storagemarket.StorageDeal, error)
+	MarketListDeals(ctx context.Context) ([]MarketDeal, error)
 	MarketListRetrievalDeals(ctx context.Context) ([]retrievalmarket.ProviderDealState, error)
-	MarketGetDealUpdates(ctx context.Context, d cid.Cid) (<-chan storagemarket.MinerDeal, error)
+	MarketGetDealUpdates(ctx context.Context) (<-chan storagemarket.MinerDeal, error)
 	MarketListIncompleteDeals(ctx context.Context) ([]storagemarket.MinerDeal, error)
 	MarketSetAsk(ctx context.Context, price types.BigInt, verifiedPrice types.BigInt, duration abi.ChainEpoch, minPieceSize abi.PaddedPieceSize, maxPieceSize abi.PaddedPieceSize) error
 	MarketGetAsk(ctx context.Context) (*storagemarket.SignedStorageAsk, error)
@@ -83,7 +83,7 @@ type StorageMiner interface {
 	MarketDataTransferUpdates(ctx context.Context) (<-chan DataTransferChannel, error)
 
 	DealsImportData(ctx context.Context, dealPropCid cid.Cid, file string) error
-	DealsList(ctx context.Context) ([]storagemarket.StorageDeal, error)
+	DealsList(ctx context.Context) ([]MarketDeal, error)
 	DealsConsiderOnlineStorageDeals(context.Context) (bool, error)
 	DealsSetConsiderOnlineStorageDeals(context.Context, bool) error
 	DealsConsiderOnlineRetrievalDeals(context.Context) (bool, error)
@@ -101,6 +101,12 @@ type StorageMiner interface {
 	PiecesListCidInfos(ctx context.Context) ([]cid.Cid, error)
 	PiecesGetPieceInfo(ctx context.Context, pieceCid cid.Cid) (*piecestore.PieceInfo, error)
 	PiecesGetCIDInfo(ctx context.Context, payloadCid cid.Cid) (*piecestore.CIDInfo, error)
+
+	// CreateBackup creates node backup onder the specified file name. The
+	// method requires that the lotus-miner is running with the
+	// LOTUS_BACKUP_BASE_PATH environment variable set to some path, and that
+	// the path specified when calling CreateBackup is within the base path
+	CreateBackup(ctx context.Context, fpath string) error
 }
 
 type SealRes struct {
@@ -120,16 +126,18 @@ type SectorLog struct {
 }
 
 type SectorInfo struct {
-	SectorID  abi.SectorNumber
-	State     SectorState
-	CommD     *cid.Cid
-	CommR     *cid.Cid
-	Proof     []byte
-	Deals     []abi.DealID
-	Ticket    SealTicket
-	Seed      SealSeed
-	Retries   uint64
-	ToUpgrade bool
+	SectorID     abi.SectorNumber
+	State        SectorState
+	CommD        *cid.Cid
+	CommR        *cid.Cid
+	Proof        []byte
+	Deals        []abi.DealID
+	Ticket       SealTicket
+	Seed         SealSeed
+	PreCommitMsg *cid.Cid
+	CommitMsg    *cid.Cid
+	Retries      uint64
+	ToUpgrade    bool
 
 	LastErr string
 

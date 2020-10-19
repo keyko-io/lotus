@@ -92,6 +92,12 @@ lotus-shed: $(BUILD_DEPS)
 .PHONY: lotus-shed
 BINS+=lotus-shed
 
+lotus-gateway: $(BUILD_DEPS)
+	rm -f lotus-gateway
+	go build $(GOFLAGS) -o lotus-gateway ./cmd/lotus-gateway
+.PHONY: lotus-gateway
+BINS+=lotus-gateway
+
 build: lotus lotus-miner lotus-worker
 	@[[ $$(type -P "lotus") ]] && echo "Caution: you have \
 an existing lotus binary in your PATH. This may cause problems if you don't run 'sudo make install'" || true
@@ -179,6 +185,12 @@ lotus-health:
 	go run github.com/GeertJohan/go.rice/rice append --exec lotus-health -i ./build
 .PHONY: lotus-health
 BINS+=lotus-health
+
+lotus-wallet:
+	rm -f lotus-wallet
+	go build -o lotus-wallet ./cmd/lotus-wallet
+.PHONY: lotus-wallet
+BINS+=lotus-wallet
 
 testground:
 	go build -tags testground -o /dev/null ./cmd/lotus
@@ -278,6 +290,9 @@ method-gen:
 	(cd ./lotuspond/front/src/chain && go run ./methodgen.go)
 
 gen: type-gen method-gen
+
+docsgen:
+	go run ./api/docgen > documentation/en/api-methods.md
 
 print-%:
 	@echo $*=$($*)

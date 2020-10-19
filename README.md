@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://lotu.sh/" title="Lotus Docs">
+  <a href="https://docs.filecoin.io/" title="Filecoin Docs">
     <img src="documentation/images/lotus_logo_h.png" alt="Project Lotus Logo" width="244" />
   </a>
 </p>
@@ -18,7 +18,7 @@ Lotus is an implementation of the Filecoin Distributed Storage Network. For more
 
 ## Building & Documentation
 
-For instructions on how to build lotus from source, please visit [https://lotu.sh](https://lotu.sh) or read the source [here](https://github.com/filecoin-project/lotus/tree/master/documentation).
+For instructions on how to build, install and setup lotus, please visit [https://docs.filecoin.io/get-started/lotus](https://docs.filecoin.io/get-started/lotus/).
 
 ## Reporting a Vulnerability
 
@@ -40,9 +40,6 @@ All work is tracked via issues. An attempt at keeping an up-to-date view on rema
 The lotus Filecoin implementation unfolds into the following packages:
 
 - [This repo](https://github.com/filecoin-project/lotus)
-- [storage-fsm](https://github.com/filecoin-project/storage-fsm)
-- [sector-storage](https://github.com/filecoin-project/sector-storage)
-- [specs-storage](https://github.com/filecoin-project/specs-storage)
 - [go-fil-markets](https://github.com/filecoin-project/go-fil-markets) which has its own [kanban work tracker available here](https://app.zenhub.com/workspaces/markets-shared-components-5daa144a7046a60001c6e253/board)
 - [spec-actors](https://github.com/filecoin-project/specs-actors) which has its own [kanban work tracker available here](https://app.zenhub.com/workspaces/actors-5ee6f3aa87591f0016c05685/board)
 

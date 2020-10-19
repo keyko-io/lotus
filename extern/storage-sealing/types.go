@@ -6,10 +6,10 @@ import (
 
 	"github.com/ipfs/go-cid"
 
-	"github.com/filecoin-project/specs-actors/actors/abi"
-	"github.com/filecoin-project/specs-actors/actors/abi/big"
-	"github.com/filecoin-project/specs-actors/actors/builtin/miner"
-	"github.com/filecoin-project/specs-actors/actors/runtime/exitcode"
+	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/big"
+	"github.com/filecoin-project/go-state-types/exitcode"
+	miner0 "github.com/filecoin-project/specs-actors/actors/builtin/miner"
 	"github.com/filecoin-project/specs-storage/storage"
 
 	sectorstorage "github.com/filecoin-project/lotus/extern/sector-storage"
@@ -30,6 +30,7 @@ type Piece struct {
 
 // DealInfo is a tuple of deal identity and its schedule
 type DealInfo struct {
+	PublishCid   *cid.Cid
 	DealID       abi.DealID
 	DealSchedule DealSchedule
 	KeepUnsealed bool
@@ -53,6 +54,15 @@ type Log struct {
 	Kind string
 }
 
+type ReturnState string
+
+const (
+	RetPreCommit1      = ReturnState(PreCommit1)
+	RetPreCommitting   = ReturnState(PreCommitting)
+	RetPreCommitFailed = ReturnState(PreCommitFailed)
+	RetCommitFailed    = ReturnState(CommitFailed)
+)
+
 type SectorInfo struct {
 	State        SectorState
 	SectorNumber abi.SectorNumber
@@ -72,7 +82,7 @@ type SectorInfo struct {
 	CommR *cid.Cid
 	Proof []byte
 
-	PreCommitInfo    *miner.SectorPreCommitInfo
+	PreCommitInfo    *miner0.SectorPreCommitInfo
 	PreCommitDeposit big.Int
 	PreCommitMessage *cid.Cid
 	PreCommitTipSet  TipSetToken
@@ -89,6 +99,9 @@ type SectorInfo struct {
 
 	// Faults
 	FaultReportMsg *cid.Cid
+
+	// Recovery
+	Return ReturnState
 
 	// Debug
 	LastErr string

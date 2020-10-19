@@ -1,11 +1,21 @@
 package messagepool
 
 import (
+	"compress/gzip"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"math"
 	"math/big"
 	"math/rand"
+	"os"
+	"sort"
 	"testing"
+
+	"github.com/ipfs/go-cid"
+	"github.com/ipfs/go-datastore"
+	logging "github.com/ipfs/go-log"
 
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/lotus/build"
@@ -14,16 +24,18 @@ import (
 	"github.com/filecoin-project/lotus/chain/types/mock"
 	"github.com/filecoin-project/lotus/chain/wallet"
 	"github.com/filecoin-project/specs-actors/actors/builtin"
-	"github.com/filecoin-project/specs-actors/actors/crypto"
-	"github.com/ipfs/go-cid"
-	"github.com/ipfs/go-datastore"
 
+	"github.com/filecoin-project/lotus/api"
 	_ "github.com/filecoin-project/lotus/lib/sigs/bls"
 	_ "github.com/filecoin-project/lotus/lib/sigs/secp"
-	logging "github.com/ipfs/go-log"
 )
 
-func makeTestMessage(w *wallet.Wallet, from, to address.Address, nonce uint64, gasLimit int64, gasPrice uint64) *types.SignedMessage {
+func init() {
+	// bump this for the selection tests
+	MaxActorPendingMessages = 1000000
+}
+
+func makeTestMessage(w *wallet.LocalWallet, from, to address.Address, nonce uint64, gasLimit int64, gasPrice uint64) *types.SignedMessage {
 	msg := &types.Message{
 		From:       from,
 		To:         to,
@@ -34,7 +46,7 @@ func makeTestMessage(w *wallet.Wallet, from, to address.Address, nonce uint64, g
 		GasFeeCap:  types.NewInt(100 + gasPrice),
 		GasPremium: types.NewInt(gasPrice),
 	}
-	sig, err := w.Sign(context.TODO(), from, msg.Cid().Bytes())
+	sig, err := w.WalletSign(context.TODO(), from, msg.Cid().Bytes(), api.MsgMeta{})
 	if err != nil {
 		panic(err)
 	}
@@ -47,7 +59,7 @@ func makeTestMessage(w *wallet.Wallet, from, to address.Address, nonce uint64, g
 func makeTestMpool() (*MessagePool, *testMpoolAPI) {
 	tma := newTestMpoolAPI()
 	ds := datastore.NewMapDatastore()
-	mp, err := New(tma, ds, "test")
+	mp, err := New(tma, ds, "test", nil)
 	if err != nil {
 		panic(err)
 	}
@@ -64,7 +76,7 @@ func TestMessageChains(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a1, err := w1.GenerateKey(crypto.SigTypeSecp256k1)
+	a1, err := w1.WalletNew(context.Background(), types.KTSecp256k1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,12 +86,12 @@ func TestMessageChains(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a2, err := w2.GenerateKey(crypto.SigTypeSecp256k1)
+	a2, err := w2.WalletNew(context.Background(), types.KTSecp256k1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	block := mock.MkBlock(nil, 1, 1)
+	block := tma.nextBlock()
 	ts := mock.TipSet(block)
 
 	gasLimit := gasguess.Costs[gasguess.CostKey{Code: builtin.StorageMarketActorCodeID, M: 2}]
@@ -302,7 +314,7 @@ func TestMessageChainSkipping(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a1, err := w1.GenerateKey(crypto.SigTypeSecp256k1)
+	a1, err := w1.WalletNew(context.Background(), types.KTSecp256k1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,12 +324,12 @@ func TestMessageChainSkipping(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a2, err := w2.GenerateKey(crypto.SigTypeSecp256k1)
+	a2, err := w2.WalletNew(context.Background(), types.KTSecp256k1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	block := mock.MkBlock(nil, 1, 1)
+	block := tma.nextBlock()
 	ts := mock.TipSet(block)
 
 	gasLimit := gasguess.Costs[gasguess.CostKey{Code: builtin.StorageMarketActorCodeID, M: 2}]
@@ -364,6 +376,12 @@ func TestMessageChainSkipping(t *testing.T) {
 }
 
 func TestBasicMessageSelection(t *testing.T) {
+	oldMaxNonceGap := MaxNonceGap
+	MaxNonceGap = 1000
+	defer func() {
+		MaxNonceGap = oldMaxNonceGap
+	}()
+
 	mp, tma := makeTestMpool()
 
 	// the actors
@@ -372,7 +390,7 @@ func TestBasicMessageSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a1, err := w1.GenerateKey(crypto.SigTypeSecp256k1)
+	a1, err := w1.WalletNew(context.Background(), types.KTSecp256k1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -382,12 +400,12 @@ func TestBasicMessageSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a2, err := w2.GenerateKey(crypto.SigTypeSecp256k1)
+	a2, err := w2.WalletNew(context.Background(), types.KTSecp256k1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	block := mock.MkBlock(nil, 1, 1)
+	block := tma.nextBlock()
 	ts := mock.TipSet(block)
 	tma.applyBlock(t, block)
 
@@ -440,12 +458,12 @@ func TestBasicMessageSelection(t *testing.T) {
 	}
 
 	// now we make a block with all the messages and advance the chain
-	block2 := mock.MkBlock(ts, 2, 2)
+	block2 := tma.nextBlock()
 	tma.setBlockMessages(block2, msgs...)
 	tma.applyBlock(t, block2)
 
 	// we should have no pending messages in the mpool
-	pend, ts2 := mp.Pending()
+	pend, _ := mp.Pending()
 	if len(pend) != 0 {
 		t.Fatalf("expected no pending messages, but got %d", len(pend))
 	}
@@ -458,13 +476,13 @@ func TestBasicMessageSelection(t *testing.T) {
 		m = makeTestMessage(w2, a2, a1, uint64(i), gasLimit, uint64(i+1))
 		msgs = append(msgs, m)
 	}
-	block3 := mock.MkBlock(ts2, 3, 3)
+	block3 := tma.nextBlock()
 	tma.setBlockMessages(block3, msgs...)
 	ts3 := mock.TipSet(block3)
 
 	// now create another set of messages and add them to the mpool
 	for i := 20; i < 30; i++ {
-		m := makeTestMessage(w1, a1, a2, uint64(i), gasLimit, uint64(2*i+1))
+		m := makeTestMessage(w1, a1, a2, uint64(i), gasLimit, uint64(2*i+200))
 		mustAdd(t, mp, m)
 		m = makeTestMessage(w2, a2, a1, uint64(i), gasLimit, uint64(i+1))
 		mustAdd(t, mp, m)
@@ -480,12 +498,12 @@ func TestBasicMessageSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(msgs) != 40 {
-		t.Fatalf("expected 40 messages, got %d", len(msgs))
+	if len(msgs) != 20 {
+		t.Fatalf("expected 20 messages, got %d", len(msgs))
 	}
 
-	nextNonce = 10
-	for i := 0; i < 20; i++ {
+	nextNonce = 20
+	for i := 0; i < 10; i++ {
 		if msgs[i].Message.From != a1 {
 			t.Fatalf("expected message from actor a1")
 		}
@@ -495,8 +513,8 @@ func TestBasicMessageSelection(t *testing.T) {
 		nextNonce++
 	}
 
-	nextNonce = 10
-	for i := 20; i < 40; i++ {
+	nextNonce = 20
+	for i := 10; i < 20; i++ {
 		if msgs[i].Message.From != a2 {
 			t.Fatalf("expected message from actor a2")
 		}
@@ -516,7 +534,7 @@ func TestMessageSelectionTrimming(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a1, err := w1.GenerateKey(crypto.SigTypeSecp256k1)
+	a1, err := w1.WalletNew(context.Background(), types.KTSecp256k1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,12 +544,12 @@ func TestMessageSelectionTrimming(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a2, err := w2.GenerateKey(crypto.SigTypeSecp256k1)
+	a2, err := w2.WalletNew(context.Background(), types.KTSecp256k1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	block := mock.MkBlock(nil, 1, 1)
+	block := tma.nextBlock()
 	ts := mock.TipSet(block)
 	tma.applyBlock(t, block)
 
@@ -579,7 +597,7 @@ func TestPriorityMessageSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a1, err := w1.GenerateKey(crypto.SigTypeSecp256k1)
+	a1, err := w1.WalletNew(context.Background(), types.KTSecp256k1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,12 +607,12 @@ func TestPriorityMessageSelection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a2, err := w2.GenerateKey(crypto.SigTypeSecp256k1)
+	a2, err := w2.WalletNew(context.Background(), types.KTSecp256k1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	block := mock.MkBlock(nil, 1, 1)
+	block := tma.nextBlock()
 	ts := mock.TipSet(block)
 	tma.applyBlock(t, block)
 
@@ -649,6 +667,169 @@ func TestPriorityMessageSelection(t *testing.T) {
 	}
 }
 
+func TestPriorityMessageSelection2(t *testing.T) {
+	mp, tma := makeTestMpool()
+
+	// the actors
+	w1, err := wallet.NewWallet(wallet.NewMemKeyStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a1, err := w1.WalletNew(context.Background(), types.KTSecp256k1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w2, err := wallet.NewWallet(wallet.NewMemKeyStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a2, err := w2.WalletNew(context.Background(), types.KTSecp256k1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	block := tma.nextBlock()
+	ts := mock.TipSet(block)
+	tma.applyBlock(t, block)
+
+	gasLimit := gasguess.Costs[gasguess.CostKey{Code: builtin.StorageMarketActorCodeID, M: 2}]
+
+	tma.setBalance(a1, 1) // in FIL
+	tma.setBalance(a2, 1) // in FIL
+
+	mp.cfg.PriorityAddrs = []address.Address{a1}
+
+	nMessages := int(2 * build.BlockGasLimit / gasLimit)
+	for i := 0; i < nMessages; i++ {
+		bias := (nMessages - i) / 3
+		m := makeTestMessage(w1, a1, a2, uint64(i), gasLimit, uint64(1+i%3+bias))
+		mustAdd(t, mp, m)
+		m = makeTestMessage(w2, a2, a1, uint64(i), gasLimit, uint64(1+i%3+bias))
+		mustAdd(t, mp, m)
+	}
+
+	msgs, err := mp.SelectMessages(ts, 1.0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedMsgs := int(build.BlockGasLimit / gasLimit)
+	if len(msgs) != expectedMsgs {
+		t.Fatalf("expected %d messages but got %d", expectedMsgs, len(msgs))
+	}
+
+	// all messages must be from a1
+	nextNonce := uint64(0)
+	for _, m := range msgs {
+		if m.Message.From != a1 {
+			t.Fatal("expected messages from a1 before messages from a2")
+		}
+		if m.Message.Nonce != nextNonce {
+			t.Fatalf("expected nonce %d but got %d", nextNonce, m.Message.Nonce)
+		}
+		nextNonce++
+	}
+}
+
+func TestPriorityMessageSelection3(t *testing.T) {
+	t.Skip("reenable after removing allow negative")
+
+	mp, tma := makeTestMpool()
+
+	// the actors
+	w1, err := wallet.NewWallet(wallet.NewMemKeyStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a1, err := w1.WalletNew(context.Background(), types.KTSecp256k1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w2, err := wallet.NewWallet(wallet.NewMemKeyStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a2, err := w2.WalletNew(context.Background(), types.KTSecp256k1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	block := tma.nextBlock()
+	ts := mock.TipSet(block)
+	tma.applyBlock(t, block)
+
+	gasLimit := gasguess.Costs[gasguess.CostKey{Code: builtin.StorageMarketActorCodeID, M: 2}]
+
+	tma.setBalance(a1, 1) // in FIL
+	tma.setBalance(a2, 1) // in FIL
+
+	mp.cfg.PriorityAddrs = []address.Address{a1}
+
+	tma.baseFee = types.NewInt(1000)
+	nMessages := 10
+	for i := 0; i < nMessages; i++ {
+		bias := (nMessages - i) / 3
+		m := makeTestMessage(w1, a1, a2, uint64(i), gasLimit, uint64(1000+i%3+bias))
+		mustAdd(t, mp, m)
+		// messages from a2 have negative performance
+		m = makeTestMessage(w2, a2, a1, uint64(i), gasLimit, 100)
+		mustAdd(t, mp, m)
+	}
+
+	// test greedy selection
+	msgs, err := mp.SelectMessages(ts, 1.0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedMsgs := 10
+	if len(msgs) != expectedMsgs {
+		t.Fatalf("expected %d messages but got %d", expectedMsgs, len(msgs))
+	}
+
+	// all messages must be from a1
+	nextNonce := uint64(0)
+	for _, m := range msgs {
+		if m.Message.From != a1 {
+			t.Fatal("expected messages from a1 before messages from a2")
+		}
+		if m.Message.Nonce != nextNonce {
+			t.Fatalf("expected nonce %d but got %d", nextNonce, m.Message.Nonce)
+		}
+		nextNonce++
+	}
+
+	// test optimal selection
+	msgs, err = mp.SelectMessages(ts, 0.1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedMsgs = 10
+	if len(msgs) != expectedMsgs {
+		t.Fatalf("expected %d messages but got %d", expectedMsgs, len(msgs))
+	}
+
+	// all messages must be from a1
+	nextNonce = uint64(0)
+	for _, m := range msgs {
+		if m.Message.From != a1 {
+			t.Fatal("expected messages from a1 before messages from a2")
+		}
+		if m.Message.Nonce != nextNonce {
+			t.Fatalf("expected nonce %d but got %d", nextNonce, m.Message.Nonce)
+		}
+		nextNonce++
+	}
+
+}
+
 func TestOptimalMessageSelection1(t *testing.T) {
 	// this test uses just a single actor sending messages with a low tq
 	// the chain depenent merging algorithm should pick messages from the actor
@@ -661,7 +842,7 @@ func TestOptimalMessageSelection1(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a1, err := w1.GenerateKey(crypto.SigTypeSecp256k1)
+	a1, err := w1.WalletNew(context.Background(), types.KTSecp256k1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -671,12 +852,12 @@ func TestOptimalMessageSelection1(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a2, err := w2.GenerateKey(crypto.SigTypeSecp256k1)
+	a2, err := w2.WalletNew(context.Background(), types.KTSecp256k1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	block := mock.MkBlock(nil, 1, 1)
+	block := tma.nextBlock()
 	ts := mock.TipSet(block)
 	tma.applyBlock(t, block)
 
@@ -728,7 +909,7 @@ func TestOptimalMessageSelection2(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a1, err := w1.GenerateKey(crypto.SigTypeSecp256k1)
+	a1, err := w1.WalletNew(context.Background(), types.KTSecp256k1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -738,12 +919,12 @@ func TestOptimalMessageSelection2(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a2, err := w2.GenerateKey(crypto.SigTypeSecp256k1)
+	a2, err := w2.WalletNew(context.Background(), types.KTSecp256k1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	block := mock.MkBlock(nil, 1, 1)
+	block := tma.nextBlock()
 	ts := mock.TipSet(block)
 	tma.applyBlock(t, block)
 
@@ -804,7 +985,7 @@ func TestOptimalMessageSelection3(t *testing.T) {
 	nActors := 10
 	// the actors
 	var actors []address.Address
-	var wallets []*wallet.Wallet
+	var wallets []*wallet.LocalWallet
 
 	for i := 0; i < nActors; i++ {
 		w, err := wallet.NewWallet(wallet.NewMemKeyStore())
@@ -812,7 +993,7 @@ func TestOptimalMessageSelection3(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		a, err := w.GenerateKey(crypto.SigTypeSecp256k1)
+		a, err := w.WalletNew(context.Background(), types.KTSecp256k1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -821,7 +1002,7 @@ func TestOptimalMessageSelection3(t *testing.T) {
 		wallets = append(wallets, w)
 	}
 
-	block := mock.MkBlock(nil, 1, 1)
+	block := tma.nextBlock()
 	ts := mock.TipSet(block)
 	tma.applyBlock(t, block)
 
@@ -879,13 +1060,12 @@ func testCompetitiveMessageSelection(t *testing.T, rng *rand.Rand, getPremium fu
 	// actors send with an randomly distributed premium dictated by the getPremium function.
 	// a number of miners select with varying ticket quality and we compare the
 	// capacity and rewards of greedy selection -vs- optimal selection
-
 	mp, tma := makeTestMpool()
 
 	nActors := 300
 	// the actors
 	var actors []address.Address
-	var wallets []*wallet.Wallet
+	var wallets []*wallet.LocalWallet
 
 	for i := 0; i < nActors; i++ {
 		w, err := wallet.NewWallet(wallet.NewMemKeyStore())
@@ -893,7 +1073,7 @@ func testCompetitiveMessageSelection(t *testing.T, rng *rand.Rand, getPremium fu
 			t.Fatal(err)
 		}
 
-		a, err := w.GenerateKey(crypto.SigTypeSecp256k1)
+		a, err := w.WalletNew(context.Background(), types.KTSecp256k1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -902,7 +1082,7 @@ func testCompetitiveMessageSelection(t *testing.T, rng *rand.Rand, getPremium fu
 		wallets = append(wallets, w)
 	}
 
-	block := mock.MkBlock(nil, 1, 1)
+	block := tma.nextBlock()
 	ts := mock.TipSet(block)
 	tma.applyBlock(t, block)
 
@@ -984,17 +1164,17 @@ func testCompetitiveMessageSelection(t *testing.T, rng *rand.Rand, getPremium fu
 
 		greedyReward := big.NewInt(0)
 		for _, m := range greedyMsgs {
-			greedyReward.Add(greedyReward, mp.getGasReward(m, baseFee, ts))
+			greedyReward.Add(greedyReward, mp.getGasReward(m, baseFee))
 		}
 
 		optReward := big.NewInt(0)
 		for _, m := range optMsgs {
-			optReward.Add(optReward, mp.getGasReward(m, baseFee, ts))
+			optReward.Add(optReward, mp.getGasReward(m, baseFee))
 		}
 
 		bestTqReward := big.NewInt(0)
 		for _, m := range bestMsgs {
-			bestTqReward.Add(bestTqReward, mp.getGasReward(m, baseFee, ts))
+			bestTqReward.Add(bestTqReward, mp.getGasReward(m, baseFee))
 		}
 
 		totalBestTQReward += float64(bestTqReward.Uint64())
@@ -1037,6 +1217,9 @@ func makeZipfPremiumDistribution(rng *rand.Rand) func() uint64 {
 }
 
 func TestCompetitiveMessageSelectionExp(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode")
+	}
 	var capacityBoost, rewardBoost, tqReward float64
 	seeds := []int64{1947, 1976, 2020, 2100, 10000, 143324, 432432, 131, 32, 45}
 	for _, seed := range seeds {
@@ -1074,4 +1257,210 @@ func TestCompetitiveMessageSelectionZipf(t *testing.T) {
 	t.Logf("Average capacity boost across all seeds: %f", capacityBoost)
 	t.Logf("Average reward boost across all seeds: %f", rewardBoost)
 	t.Logf("Average reward of best ticket across all seeds: %f", tqReward)
+}
+
+func TestGasReward(t *testing.T) {
+	tests := []struct {
+		Premium   uint64
+		FeeCap    uint64
+		BaseFee   uint64
+		GasReward int64
+	}{
+		{Premium: 100, FeeCap: 200, BaseFee: 100, GasReward: 100},
+		{Premium: 100, FeeCap: 200, BaseFee: 210, GasReward: -10},
+		{Premium: 200, FeeCap: 250, BaseFee: 210, GasReward: 40},
+		{Premium: 200, FeeCap: 250, BaseFee: 2000, GasReward: -1750},
+	}
+
+	mp := new(MessagePool)
+	for _, test := range tests {
+		test := test
+		t.Run(fmt.Sprintf("%v", test), func(t *testing.T) {
+			msg := &types.SignedMessage{
+				Message: types.Message{
+					GasLimit:   10,
+					GasFeeCap:  types.NewInt(test.FeeCap),
+					GasPremium: types.NewInt(test.Premium),
+				},
+			}
+			rew := mp.getGasReward(msg, types.NewInt(test.BaseFee))
+			if rew.Cmp(big.NewInt(test.GasReward*10)) != 0 {
+				t.Errorf("bad reward: expected %d, got %s", test.GasReward*10, rew)
+			}
+		})
+	}
+}
+
+func TestRealWorldSelection(t *testing.T) {
+	// load test-messages.json.gz and rewrite the messages so that
+	// 1) we map each real actor to a test actor so that we can sign the messages
+	// 2) adjust the nonces so that they start from 0
+	file, err := os.Open("test-messages.json.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gzr, err := gzip.NewReader(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dec := json.NewDecoder(gzr)
+
+	var msgs []*types.SignedMessage
+	baseNonces := make(map[address.Address]uint64)
+
+readLoop:
+	for {
+		m := new(types.SignedMessage)
+		err := dec.Decode(m)
+		switch err {
+		case nil:
+			msgs = append(msgs, m)
+			nonce, ok := baseNonces[m.Message.From]
+			if !ok || m.Message.Nonce < nonce {
+				baseNonces[m.Message.From] = m.Message.Nonce
+			}
+
+		case io.EOF:
+			break readLoop
+
+		default:
+			t.Fatal(err)
+		}
+	}
+
+	actorMap := make(map[address.Address]address.Address)
+	actorWallets := make(map[address.Address]api.WalletAPI)
+
+	for _, m := range msgs {
+		baseNonce := baseNonces[m.Message.From]
+
+		localActor, ok := actorMap[m.Message.From]
+		if !ok {
+			w, err := wallet.NewWallet(wallet.NewMemKeyStore())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			a, err := w.WalletNew(context.Background(), types.KTSecp256k1)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			actorMap[m.Message.From] = a
+			actorWallets[a] = w
+			localActor = a
+		}
+
+		w, ok := actorWallets[localActor]
+		if !ok {
+			t.Fatalf("failed to lookup wallet for actor %s", localActor)
+		}
+
+		m.Message.From = localActor
+		m.Message.Nonce -= baseNonce
+
+		sig, err := w.WalletSign(context.TODO(), localActor, m.Message.Cid().Bytes(), api.MsgMeta{})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		m.Signature = *sig
+	}
+
+	mp, tma := makeTestMpool()
+
+	block := tma.nextBlockWithHeight(build.UpgradeBreezeHeight + 10)
+	ts := mock.TipSet(block)
+	tma.applyBlock(t, block)
+
+	for _, a := range actorMap {
+		tma.setBalance(a, 1000000)
+	}
+
+	tma.baseFee = types.NewInt(800_000_000)
+
+	sort.Slice(msgs, func(i, j int) bool {
+		return msgs[i].Message.Nonce < msgs[j].Message.Nonce
+	})
+
+	// add the messages
+	for _, m := range msgs {
+		mustAdd(t, mp, m)
+	}
+
+	// do message selection and check block packing
+	minGasLimit := int64(0.9 * float64(build.BlockGasLimit))
+
+	// greedy first
+	selected, err := mp.SelectMessages(ts, 1.0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gasLimit := int64(0)
+	for _, m := range selected {
+		gasLimit += m.Message.GasLimit
+	}
+	if gasLimit < minGasLimit {
+		t.Fatalf("failed to pack with tq=1.0; packed %d, minimum packing: %d", gasLimit, minGasLimit)
+	}
+
+	// high quality ticket
+	selected, err = mp.SelectMessages(ts, .8)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gasLimit = int64(0)
+	for _, m := range selected {
+		gasLimit += m.Message.GasLimit
+	}
+	if gasLimit < minGasLimit {
+		t.Fatalf("failed to pack with tq=0.8; packed %d, minimum packing: %d", gasLimit, minGasLimit)
+	}
+
+	// mid quality ticket
+	selected, err = mp.SelectMessages(ts, .4)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gasLimit = int64(0)
+	for _, m := range selected {
+		gasLimit += m.Message.GasLimit
+	}
+	if gasLimit < minGasLimit {
+		t.Fatalf("failed to pack with tq=0.4; packed %d, minimum packing: %d", gasLimit, minGasLimit)
+	}
+
+	// low quality ticket
+	selected, err = mp.SelectMessages(ts, .1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gasLimit = int64(0)
+	for _, m := range selected {
+		gasLimit += m.Message.GasLimit
+	}
+	if gasLimit < minGasLimit {
+		t.Fatalf("failed to pack with tq=0.1; packed %d, minimum packing: %d", gasLimit, minGasLimit)
+	}
+
+	// very low quality ticket
+	selected, err = mp.SelectMessages(ts, .01)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gasLimit = int64(0)
+	for _, m := range selected {
+		gasLimit += m.Message.GasLimit
+	}
+	if gasLimit < minGasLimit {
+		t.Fatalf("failed to pack with tq=0.01; packed %d, minimum packing: %d", gasLimit, minGasLimit)
+	}
+
 }

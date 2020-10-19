@@ -38,23 +38,27 @@ func TestStore(t *testing.T) {
 	}
 
 	// Track the channel
-	err = store.TrackChannel(ci)
+	_, err = store.TrackChannel(ci)
 	require.NoError(t, err)
 
 	// Tracking same channel again should error
-	err = store.TrackChannel(ci)
+	_, err = store.TrackChannel(ci)
 	require.Error(t, err)
 
 	// Track another channel
-	err = store.TrackChannel(ci2)
+	_, err = store.TrackChannel(ci2)
 	require.NoError(t, err)
 
 	// List channels should include all channels
 	addrs, err = store.ListChannels()
 	require.NoError(t, err)
 	require.Len(t, addrs, 2)
-	require.Contains(t, addrsStrings(addrs), "t0100")
-	require.Contains(t, addrsStrings(addrs), "t0200")
+	t0100, err := address.NewIDAddress(100)
+	require.NoError(t, err)
+	t0200, err := address.NewIDAddress(200)
+	require.NoError(t, err)
+	require.Contains(t, addrs, t0100)
+	require.Contains(t, addrs, t0200)
 
 	// Request vouchers for channel
 	vouchers, err := store.VouchersForPaych(*ci.Channel)
@@ -78,12 +82,4 @@ func TestStore(t *testing.T) {
 	// Allocate next lane for non-existent channel should error
 	_, err = store.AllocateLane(tutils.NewIDAddr(t, 300))
 	require.Equal(t, err, ErrChannelNotTracked)
-}
-
-func addrsStrings(addrs []address.Address) []string {
-	str := make([]string, len(addrs))
-	for i, a := range addrs {
-		str[i] = a.String()
-	}
-	return str
 }

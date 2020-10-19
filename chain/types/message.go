@@ -2,11 +2,12 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 
+	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/big"
 	"github.com/filecoin-project/lotus/build"
-	"github.com/filecoin-project/specs-actors/actors/abi"
-	"github.com/filecoin-project/specs-actors/actors/abi/big"
 	block "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	xerrors "golang.org/x/xerrors"
@@ -106,6 +107,20 @@ func (m *Message) Cid() cid.Cid {
 	return b.Cid()
 }
 
+type mCid struct {
+	*RawMessage
+	CID cid.Cid
+}
+
+type RawMessage Message
+
+func (m *Message) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&mCid{
+		RawMessage: (*RawMessage)(m),
+		CID:        m.Cid(),
+	})
+}
+
 func (m *Message) RequiredFunds() BigInt {
 	return BigMul(m.GasFeeCap, NewInt(uint64(m.GasLimit)))
 }
@@ -180,7 +195,7 @@ func (m *Message) ValidForBlockInclusion(minGas int64) error {
 
 	// since prices might vary with time, this is technically semantic validation
 	if m.GasLimit < minGas {
-		return xerrors.New("'GasLimit' field cannot be less than the cost of storing a message on chain")
+		return xerrors.Errorf("'GasLimit' field cannot be less than the cost of storing a message on chain %d < %d", m.GasLimit, minGas)
 	}
 
 	return nil

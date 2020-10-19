@@ -12,7 +12,7 @@ import (
 	"github.com/ipfs/go-cid"
 	logging "github.com/ipfs/go-log/v2"
 	"github.com/multiformats/go-multiaddr"
-	manet "github.com/multiformats/go-multiaddr-net"
+	manet "github.com/multiformats/go-multiaddr/net"
 	"golang.org/x/xerrors"
 
 	"contrib.go.opencensus.io/exporter/prometheus"
@@ -66,8 +66,10 @@ func serveRPC(a api.FullNode, stop node.StopFunc, addr multiaddr.Multiaddr, shut
 	shutdownDone := make(chan struct{})
 	go func() {
 		select {
-		case <-sigCh:
+		case sig := <-sigCh:
+			log.Warnw("received shutdown", "signal", sig)
 		case <-shutdownCh:
+			log.Warn("received shutdown")
 		}
 
 		log.Warn("Shutting down...")

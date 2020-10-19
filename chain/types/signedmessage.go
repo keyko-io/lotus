@@ -2,9 +2,10 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 
-	"github.com/filecoin-project/specs-actors/actors/abi"
-	"github.com/filecoin-project/specs-actors/actors/crypto"
+	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/crypto"
 	block "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 )
@@ -62,8 +63,29 @@ func (sm *SignedMessage) Serialize() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+type smCid struct {
+	*RawSignedMessage
+	CID cid.Cid
+}
+
+type RawSignedMessage SignedMessage
+
+func (sm *SignedMessage) MarshalJSON() ([]byte, error) {
+	return json.Marshal(&smCid{
+		RawSignedMessage: (*RawSignedMessage)(sm),
+		CID:              sm.Cid(),
+	})
+}
+
 func (sm *SignedMessage) ChainLength() int {
-	ser, err := sm.Serialize()
+	var ser []byte
+	var err error
+	if sm.Signature.Type == crypto.SigTypeBLS {
+		// BLS chain message length doesn't include signature
+		ser, err = sm.Message.Serialize()
+	} else {
+		ser, err = sm.Serialize()
+	}
 	if err != nil {
 		panic(err)
 	}

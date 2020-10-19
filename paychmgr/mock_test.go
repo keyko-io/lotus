@@ -2,19 +2,20 @@ package paychmgr
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"sync"
 
-	cbornode "github.com/ipfs/go-ipld-cbor"
-
-	"github.com/filecoin-project/specs-actors/actors/util/adt"
+	"github.com/ipfs/go-cid"
 
 	"github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/go-state-types/crypto"
+	"github.com/filecoin-project/go-state-types/network"
+
 	"github.com/filecoin-project/lotus/api"
+	"github.com/filecoin-project/lotus/build"
+	"github.com/filecoin-project/lotus/chain/actors/builtin/paych"
 	"github.com/filecoin-project/lotus/chain/types"
-	"github.com/filecoin-project/specs-actors/actors/builtin/account"
-	"github.com/filecoin-project/specs-actors/actors/builtin/paych"
-	"github.com/ipfs/go-cid"
+	"github.com/filecoin-project/lotus/lib/sigs"
 )
 
 type mockManagerAPI struct {
@@ -36,28 +37,23 @@ type mockPchState struct {
 
 type mockStateManager struct {
 	lk           sync.Mutex
-	accountState map[address.Address]account.State
+	accountState map[address.Address]address.Address
 	paychState   map[address.Address]mockPchState
-	store        adt.Store
 	response     *api.InvocResult
+	lastCall     *types.Message
 }
 
 func newMockStateManager() *mockStateManager {
 	return &mockStateManager{
-		accountState: make(map[address.Address]account.State),
+		accountState: make(map[address.Address]address.Address),
 		paychState:   make(map[address.Address]mockPchState),
-		store:        adt.WrapStore(context.Background(), cbornode.NewMemCborStore()),
 	}
 }
 
-func (sm *mockStateManager) AdtStore(ctx context.Context) adt.Store {
-	return sm.store
-}
-
-func (sm *mockStateManager) setAccountState(a address.Address, state account.State) {
+func (sm *mockStateManager) setAccountAddress(a address.Address, lookup address.Address) {
 	sm.lk.Lock()
 	defer sm.lk.Unlock()
-	sm.accountState[a] = state
+	sm.accountState[a] = lookup
 }
 
 func (sm *mockStateManager) setPaychState(a address.Address, actor *types.Actor, state paych.State) {
@@ -66,34 +62,46 @@ func (sm *mockStateManager) setPaychState(a address.Address, actor *types.Actor,
 	sm.paychState[a] = mockPchState{actor, state}
 }
 
-func (sm *mockStateManager) storeLaneStates(laneStates map[uint64]paych.LaneState) (cid.Cid, error) {
-	arr := adt.MakeEmptyArray(sm.store)
-	for i, ls := range laneStates {
-		ls := ls
-		if err := arr.Set(i, &ls); err != nil {
-			return cid.Undef, err
-		}
+func (sm *mockStateManager) ResolveToKeyAddress(ctx context.Context, addr address.Address, ts *types.TipSet) (address.Address, error) {
+	sm.lk.Lock()
+	defer sm.lk.Unlock()
+	keyAddr, ok := sm.accountState[addr]
+	if !ok {
+		return address.Undef, errors.New("not found")
 	}
-	return arr.Root()
+	return keyAddr, nil
 }
 
-func (sm *mockStateManager) LoadActorState(ctx context.Context, a address.Address, out interface{}, ts *types.TipSet) (*types.Actor, error) {
+func (sm *mockStateManager) GetPaychState(ctx context.Context, addr address.Address, ts *types.TipSet) (*types.Actor, paych.State, error) {
+	sm.lk.Lock()
+	defer sm.lk.Unlock()
+	info, ok := sm.paychState[addr]
+	if !ok {
+		return nil, nil, errors.New("not found")
+	}
+	return info.actor, info.state, nil
+}
+
+func (sm *mockStateManager) setCallResponse(response *api.InvocResult) {
 	sm.lk.Lock()
 	defer sm.lk.Unlock()
 
-	if outState, ok := out.(*account.State); ok {
-		*outState = sm.accountState[a]
-		return nil, nil
-	}
-	if outState, ok := out.(*paych.State); ok {
-		info := sm.paychState[a]
-		*outState = info.state
-		return info.actor, nil
-	}
-	panic(fmt.Sprintf("unexpected state type %v", out))
+	sm.response = response
+}
+
+func (sm *mockStateManager) getLastCall() *types.Message {
+	sm.lk.Lock()
+	defer sm.lk.Unlock()
+
+	return sm.lastCall
 }
 
 func (sm *mockStateManager) Call(ctx context.Context, msg *types.Message, ts *types.TipSet) (*api.InvocResult, error) {
+	sm.lk.Lock()
+	defer sm.lk.Unlock()
+
+	sm.lastCall = msg
+
 	return sm.response, nil
 }
 
@@ -111,6 +119,8 @@ type mockPaychAPI struct {
 	messages         map[cid.Cid]*types.SignedMessage
 	waitingCalls     map[cid.Cid]*waitingCall
 	waitingResponses map[cid.Cid]*waitingResponse
+	wallet           map[address.Address]struct{}
+	signingKey       []byte
 }
 
 func newMockPaychAPI() *mockPaychAPI {
@@ -118,6 +128,7 @@ func newMockPaychAPI() *mockPaychAPI {
 		messages:         make(map[cid.Cid]*types.SignedMessage),
 		waitingCalls:     make(map[cid.Cid]*waitingCall),
 		waitingResponses: make(map[cid.Cid]*waitingResponse),
+		wallet:           make(map[address.Address]struct{}),
 	}
 }
 
@@ -198,4 +209,41 @@ func (pchapi *mockPaychAPI) pushedMessageCount() int {
 	defer pchapi.lk.Unlock()
 
 	return len(pchapi.messages)
+}
+
+func (pchapi *mockPaychAPI) StateAccountKey(ctx context.Context, addr address.Address, tsk types.TipSetKey) (address.Address, error) {
+	return addr, nil
+}
+
+func (pchapi *mockPaychAPI) WalletHas(ctx context.Context, addr address.Address) (bool, error) {
+	pchapi.lk.Lock()
+	defer pchapi.lk.Unlock()
+
+	_, ok := pchapi.wallet[addr]
+	return ok, nil
+}
+
+func (pchapi *mockPaychAPI) addWalletAddress(addr address.Address) {
+	pchapi.lk.Lock()
+	defer pchapi.lk.Unlock()
+
+	pchapi.wallet[addr] = struct{}{}
+}
+
+func (pchapi *mockPaychAPI) WalletSign(ctx context.Context, k address.Address, msg []byte) (*crypto.Signature, error) {
+	pchapi.lk.Lock()
+	defer pchapi.lk.Unlock()
+
+	return sigs.Sign(crypto.SigTypeSecp256k1, pchapi.signingKey, msg)
+}
+
+func (pchapi *mockPaychAPI) addSigningKey(key []byte) {
+	pchapi.lk.Lock()
+	defer pchapi.lk.Unlock()
+
+	pchapi.signingKey = key
+}
+
+func (pchapi *mockPaychAPI) StateNetworkVersion(ctx context.Context, tsk types.TipSetKey) (network.Version, error) {
+	return build.NewestNetworkVersion, nil
 }

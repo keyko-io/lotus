@@ -23,13 +23,25 @@ func main() {
 		noncefix,
 		bigIntParseCmd,
 		staterootCmd,
+		auditsCmd,
 		importCarCmd,
+		importObjectCmd,
 		commpToCidCmd,
 		fetchParamCmd,
 		proofsCmd,
 		verifRegCmd,
 		miscCmd,
 		mpoolCmd,
+		genesisVerifyCmd,
+		mathCmd,
+		mpoolStatsCmd,
+		exportChainCmd,
+		consensusCmd,
+		serveDealStatsCmd,
+		syncCmd,
+		stateTreePruneCmd,
+		datastoreCmd,
+		ledgerCmd,
 	}
 
 	app := &cli.App{
@@ -44,6 +56,13 @@ func main() {
 				Hidden:  true,
 				Value:   "~/.lotus", // TODO: Consider XDG_DATA_HOME
 			},
+			&cli.StringFlag{
+				Name:  "log-level",
+				Value: "info",
+			},
+		},
+		Before: func(cctx *cli.Context) error {
+			return logging.SetLogLevel("lotus-shed", cctx.String("log-level"))
 		},
 	}
 

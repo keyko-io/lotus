@@ -80,7 +80,8 @@ var sealingWorkersCmd = &cli.Command{
 			cpuBars := int(stat.CpuUse * barCols / stat.Info.Resources.CPUs)
 			cpuBar := strings.Repeat("|", cpuBars) + strings.Repeat(" ", int(barCols)-cpuBars)
 
-			fmt.Printf("\tCPU:  [%s] %d core(s) in use\n", color.GreenString(cpuBar), stat.CpuUse)
+			fmt.Printf("\tCPU:  [%s] %d/%d core(s) in use\n",
+				color.GreenString(cpuBar), stat.CpuUse, stat.Info.Resources.CPUs)
 
 			ramBarsRes := int(stat.Info.Resources.MemReserved * barCols / stat.Info.Resources.MemPhysical)
 			ramBarsUsed := int(stat.MemUsedMin * barCols / stat.Info.Resources.MemPhysical)
@@ -155,6 +156,9 @@ var sealingJobsCmd = &cli.Command{
 
 		// oldest first
 		sort.Slice(lines, func(i, j int) bool {
+			if lines[i].RunWait != lines[j].RunWait {
+				return lines[i].RunWait < lines[j].RunWait
+			}
 			return lines[i].Start.Before(lines[j].Start)
 		})
 
@@ -170,10 +174,14 @@ var sealingJobsCmd = &cli.Command{
 		}
 
 		tw := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-		_, _ = fmt.Fprintf(tw, "ID\tSector\tWorker\tHostname\tTask\tTime\n")
+		_, _ = fmt.Fprintf(tw, "ID\tSector\tWorker\tHostname\tTask\tState\tTime\n")
 
 		for _, l := range lines {
-			_, _ = fmt.Fprintf(tw, "%d\t%d\t%d\t%s\t%s\t%s\n", l.ID, l.Sector.Number, l.wid, workerHostnames[l.wid], l.Task.Short(), time.Now().Sub(l.Start).Truncate(time.Millisecond*100))
+			state := "running"
+			if l.RunWait != 0 {
+				state = fmt.Sprintf("assigned(%d)", l.RunWait-1)
+			}
+			_, _ = fmt.Fprintf(tw, "%d\t%d\t%d\t%s\t%s\t%s\t%s\n", l.ID, l.Sector.Number, l.wid, workerHostnames[l.wid], l.Task.Short(), state, time.Now().Sub(l.Start).Truncate(time.Millisecond*100))
 		}
 
 		return tw.Flush()

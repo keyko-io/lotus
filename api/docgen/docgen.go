@@ -12,22 +12,31 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/ipfs/go-cid"
+	"github.com/ipfs/go-filestore"
+	metrics "github.com/libp2p/go-libp2p-core/metrics"
+	"github.com/libp2p/go-libp2p-core/network"
+	"github.com/libp2p/go-libp2p-core/peer"
+	protocol "github.com/libp2p/go-libp2p-core/protocol"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/multiformats/go-multiaddr"
+
 	"github.com/filecoin-project/go-address"
 	"github.com/filecoin-project/go-bitfield"
+	datatransfer "github.com/filecoin-project/go-data-transfer"
+	"github.com/filecoin-project/go-fil-markets/retrievalmarket"
 	"github.com/filecoin-project/go-jsonrpc/auth"
+	"github.com/filecoin-project/go-multistore"
+
+	"github.com/filecoin-project/go-state-types/abi"
+	"github.com/filecoin-project/go-state-types/crypto"
+	"github.com/filecoin-project/go-state-types/exitcode"
+
 	"github.com/filecoin-project/lotus/api"
 	"github.com/filecoin-project/lotus/api/apistruct"
 	"github.com/filecoin-project/lotus/build"
 	"github.com/filecoin-project/lotus/chain/types"
 	"github.com/filecoin-project/lotus/node/modules/dtypes"
-	"github.com/filecoin-project/specs-actors/actors/abi"
-	"github.com/filecoin-project/specs-actors/actors/crypto"
-	"github.com/filecoin-project/specs-actors/actors/runtime/exitcode"
-	"github.com/ipfs/go-cid"
-	"github.com/ipfs/go-filestore"
-	"github.com/libp2p/go-libp2p-core/network"
-	"github.com/libp2p/go-libp2p-core/peer"
-	"github.com/multiformats/go-multiaddr"
 )
 
 var ExampleValues = map[reflect.Type]interface{}{
@@ -71,12 +80,14 @@ func init() {
 		panic(err)
 	}
 	addExample(pid)
+	addExample(&pid)
 
 	addExample(bitfield.NewFromSet([]uint64{5}))
 	addExample(abi.RegisteredSealProof_StackedDrg32GiBV1)
 	addExample(abi.RegisteredPoStProof_StackedDrgWindow32GiBV1)
 	addExample(abi.ChainEpoch(10101))
 	addExample(crypto.SigTypeBLS)
+	addExample(types.KTBLS)
 	addExample(int64(9))
 	addExample(12.3)
 	addExample(123)
@@ -95,9 +106,16 @@ func init() {
 	addExample(network.Connected)
 	addExample(dtypes.NetworkName("lotus"))
 	addExample(api.SyncStateStage(1))
-	addExample(build.APIVersion)
+	addExample(build.FullAPIVersion)
 	addExample(api.PCHInbound)
 	addExample(time.Minute)
+	addExample(datatransfer.TransferID(3))
+	addExample(datatransfer.Ongoing)
+	addExample(multistore.StoreID(50))
+	addExample(retrievalmarket.ClientEventDealAccepted)
+	addExample(retrievalmarket.DealStatusNew)
+	addExample(network.ReachabilityPublic)
+	addExample(build.NewestNetworkVersion)
 	addExample(&types.ExecutionTrace{
 		Msg:    exampleValue(reflect.TypeOf(&types.Message{}), nil).(*types.Message),
 		MsgRct: exampleValue(reflect.TypeOf(&types.MessageReceipt{}), nil).(*types.MessageReceipt),
@@ -110,6 +128,30 @@ func init() {
 	})
 	addExample(map[string]api.MarketBalance{
 		"t026363": exampleValue(reflect.TypeOf(api.MarketBalance{}), nil).(api.MarketBalance),
+	})
+	addExample(map[string]*pubsub.TopicScoreSnapshot{
+		"/blocks": {
+			TimeInMesh:               time.Minute,
+			FirstMessageDeliveries:   122,
+			MeshMessageDeliveries:    1234,
+			InvalidMessageDeliveries: 3,
+		},
+	})
+	addExample(map[string]metrics.Stats{
+		"12D3KooWSXmXLJmBR1M7i9RW9GQPNUhZSzXKzxDHWtAgNuJAbyEJ": {
+			RateIn:   100,
+			RateOut:  50,
+			TotalIn:  174000,
+			TotalOut: 12500,
+		},
+	})
+	addExample(map[protocol.ID]metrics.Stats{
+		"/fil/hello/1.0.0": {
+			RateIn:   100,
+			RateOut:  50,
+			TotalIn:  174000,
+			TotalOut: 12500,
+		},
 	})
 
 	maddr, err := multiaddr.NewMultiaddr("/ip4/52.36.61.156/tcp/1347/p2p/12D3KooWFETiESTf1v4PGUvtnxMAcEFMzLZbJGg4tjWfGEimYior")
